@@ -1,67 +1,234 @@
-//! # Mutex Shared State
+//! # no_std Memory Primitives
 //!
-//! In this exercise, you will use `Arc<Mutex<T>>` to safely share and modify data between multiple threads.
+//! In a `#![no_std]` environment, you have no standard library — only `core`.
+//! These memory operation functions are the most fundamental building blocks in an OS kernel.
+//! Functions like memcpy/memset in libc must be implemented by ourselves in bare-metal environments.
 //!
-//! ## Concepts
-//! - `Mutex<T>` mutex protects shared data
-//! - `Arc<T>` atomic reference counting enables cross-thread sharing
-//! - `lock()` acquires the lock and accesses data
+//! ## Task
+//!
+//! Implement the following five functions:
+//! - Only use the `core` crate, no `std`
+//! - Do not call `core::ptr::copy`, `core::ptr::copy_nonoverlapping`, etc. (write your own loops)
+//! - Handle edge cases correctly (n=0, overlapping memory regions, etc.)
+//! - Pass all tests
 
-use std::sync::{Arc, Mutex};
-use std::thread;
+// Force no_std in production; allow std in tests (cargo test framework requires it)
+#![cfg_attr(not(test), no_std)]
+#![allow(unused_variables)]
 
-/// Increment a counter concurrently using `n_threads` threads.
-/// Each thread increments the counter `count_per_thread` times.
-/// Returns the final counter value.
+/// Copy `n` bytes from `src` to `dst`.
 ///
-/// Hint: Use `Arc<Mutex<usize>>` as the shared counter.
-pub fn concurrent_counter(n_threads: usize, count_per_thread: usize) -> usize {
-    // TODO: Create Arc<Mutex<usize>> with initial value 0
-    // TODO: Spawn n_threads threads
-    // TODO: In each thread, lock() and increment count_per_thread times
-    // TODO: Join all threads, return final value
-    todo!()
+/// - `dst` and `src` must not overlap (use `my_memmove` for overlapping regions)
+/// - Returns `dst`
+///
+/// # Safety
+/// `dst` and `src` must each point to at least `n` bytes of valid memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn my_memcpy(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    let mut dest_ptr = dst;
+    let mut src_ptr = src;
+    let end = src.add(n);
+
+    while src_ptr < end {
+        *dest_ptr = *src_ptr;
+        dest_ptr = dest_ptr.add(1);
+        src_ptr = src_ptr.add(1);
+    }
+
+    dst
 }
 
-/// Add elements to a shared vector concurrently using multiple threads.
-/// Each thread pushes its own id (0..n_threads) to the vector.
-/// Returns the sorted vector.
+/// Set `n` bytes starting at `dst` to the value `c`.
 ///
-/// Hint: Use `Arc<Mutex<Vec<usize>>>`.
-pub fn concurrent_collect(n_threads: usize) -> Vec<usize> {
-    // TODO: Create Arc<Mutex<Vec<usize>>>
-    // TODO: Each thread pushes its own id
-    // TODO: After joining all threads, sort the result and return
-    todo!()
+/// Returns `dst`.
+///
+/// # Safety
+/// `dst` must point to at least `n` bytes of valid writable memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn my_memset(dst: *mut u8, c: u8, n: usize) -> *mut u8 {
+    let mut ptr = dst;
+    let end = dst.add(n);
+
+    while ptr < end {
+        *ptr = c;
+        ptr = ptr.add(1);
+    }
+
+    dst
 }
 
+/// Copy `n` bytes from `src` to `dst`, correctly handling overlapping memory.
+///
+/// Returns `dst`.
+///
+/// # Safety
+/// `dst` and `src` must each point to at least `n` bytes of valid memory.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn my_memmove(dst: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    if n == 0 {
+        return dst;
+    }
+
+    let src_usize = src as usize;
+    let dst_usize = dst as usize;
+
+    if dst_usize < src_usize {
+        // No forward overlap: copy front to back like memcpy
+        let mut dest_ptr = dst;
+        let mut src_ptr = src;
+        let end = src.add(n);
+        while src_ptr < end {
+            *dest_ptr = *src_ptr;
+            dest_ptr = dest_ptr.add(1);
+            src_ptr = src_ptr.add(1);
+        }
+    } else {
+        // Overlap: dest starts inside src range, copy backwards from last byte
+        let mut dest_ptr = dst.add(n - 1);
+        let mut src_ptr = src.add(n - 1);
+        let start = src;
+        while src_ptr >= start {
+            *dest_ptr = *src_ptr;
+            dest_ptr = dest_ptr.sub(1);
+            src_ptr = src_ptr.sub(1);
+        }
+    }
+
+    dst
+}
+
+/// Return the length of a null-terminated byte string, excluding the trailing null.
+///
+/// # Safety
+/// `s` must point to a valid null-terminated byte string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn my_strlen(s: *const u8) -> usize {
+    let mut ptr = s;
+    let mut len = 0;
+
+    while *ptr != 0 {
+        len += 1;
+        ptr = ptr.add(1);
+    }
+
+    len
+}
+
+/// Compare two null-terminated byte strings.
+///
+/// Returns:
+/// - `0`  : strings are equal
+/// - `< 0`: `s1` is lexicographically less than `s2`
+/// - `> 0`: `s1` is lexicographically greater than `s2`
+///
+/// # Safety
+/// `s1` and `s2` must each point to a valid null-terminated byte string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn my_strcmp(s1: *const u8, s2: *const u8) -> i32 {
+    let mut p1 = s1;
+    let mut p2 = s2;
+
+    loop {
+        let b1 = *p1;
+        let b2 = *p2;
+
+        if b1 != b2 {
+            return (b1 as i32) - (b2 as i32);
+        }
+        // Both null byte, equal
+        if b1 == 0 {
+            return 0;
+        }
+
+        p1 = p1.add(1);
+        p2 = p2.add(1);
+    }
+}
+
+// ============================================================
+// Tests (std is available under #[cfg(test)])
+// ============================================================
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_counter_single_thread() {
-        assert_eq!(concurrent_counter(1, 100), 100);
+    fn test_memcpy_basic() {
+        let src = [1u8, 2, 3, 4, 5];
+        let mut dst = [0u8; 5];
+        unsafe { my_memcpy(dst.as_mut_ptr(), src.as_ptr(), 5) };
+        assert_eq!(dst, src);
     }
 
     #[test]
-    fn test_counter_multi_thread() {
-        assert_eq!(concurrent_counter(10, 100), 1000);
+    fn test_memcpy_zero_len() {
+        let src = [0xFFu8; 4];
+        let mut dst = [0u8; 4];
+        unsafe { my_memcpy(dst.as_mut_ptr(), src.as_ptr(), 0) };
+        assert_eq!(dst, [0u8; 4]);
     }
 
     #[test]
-    fn test_counter_zero() {
-        assert_eq!(concurrent_counter(5, 0), 0);
+    fn test_memset_basic() {
+        let mut buf = [0u8; 8];
+        unsafe { my_memset(buf.as_mut_ptr(), 0xAB, 8) };
+        assert!(buf.iter().all(|&b| b == 0xAB));
     }
 
     #[test]
-    fn test_collect() {
-        let result = concurrent_collect(5);
-        assert_eq!(result, vec![0, 1, 2, 3, 4]);
+    fn test_memset_partial() {
+        let mut buf = [0u8; 8];
+        unsafe { my_memset(buf.as_mut_ptr(), 0xFF, 4) };
+        assert_eq!(&buf[..4], &[0xFF; 4]);
+        assert_eq!(&buf[4..], &[0x00; 4]);
     }
 
     #[test]
-    fn test_collect_single() {
-        assert_eq!(concurrent_collect(1), vec![0]);
+    fn test_memmove_no_overlap() {
+        let src = [1u8, 2, 3, 4];
+        let mut dst = [0u8; 4];
+        unsafe { my_memmove(dst.as_mut_ptr(), src.as_ptr(), 4) };
+        assert_eq!(dst, src);
+    }
+
+    #[test]
+    fn test_memmove_overlap_forward() {
+        // Copy buf[0..4] to buf[1..5], shifting right by 1
+        let mut buf = [1u8, 2, 3, 4, 5];
+        unsafe { my_memmove(buf.as_mut_ptr().add(1), buf.as_ptr(), 4) };
+        assert_eq!(buf, [1, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_strlen_basic() {
+        let s = b"hello\0";
+        assert_eq!(unsafe { my_strlen(s.as_ptr()) }, 5);
+    }
+
+    #[test]
+    fn test_strlen_empty() {
+        let s = b"\0";
+        assert_eq!(unsafe { my_strlen(s.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn test_strcmp_equal() {
+        let a = b"hello\0";
+        let b = b"hello\0";
+        assert_eq!(unsafe { my_strcmp(a.as_ptr(), b.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn test_strcmp_less() {
+        let a = b"abc\0";
+        let b = b"abd\0";
+        assert!(unsafe { my_strcmp(a.as_ptr(), b.as_ptr()) } < 0);
+    }
+
+    #[test]
+    fn test_strcmp_greater() {
+        let a = b"abd\0";
+        let b = b"abc\0";
+        assert!(unsafe { my_strcmp(a.as_ptr(), b.as_ptr()) } > 0);
     }
 }
