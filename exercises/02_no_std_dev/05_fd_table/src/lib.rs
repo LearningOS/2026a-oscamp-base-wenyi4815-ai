@@ -48,42 +48,55 @@ pub trait File: Send + Sync {
 
 /// File descriptor table
 pub struct FdTable {
-    // TODO: Design the internal structure
-    // Hint: use Vec<Option<Arc<dyn File>>>
-    //       the index is the fd number, None means the fd is closed or unallocated
+    // Vec index = fd number
+    // None: slot closed/free; Some(file): occupied open fd
+    entries: Vec<Option<Arc<dyn File>>>,
 }
 
 impl FdTable {
     /// Create an empty fd table
     pub fn new() -> Self {
-        // TODO
-        todo!()
+        Self { entries: Vec::new() }
     }
 
     /// Allocate a new fd, return the fd number.
     ///
     /// Prefers reusing the smallest closed fd number; if no free slot, appends to the end.
     pub fn alloc(&mut self, file: Arc<dyn File>) -> usize {
-        // TODO
-        todo!()
+        // Step 1: Find the smallest free slot (None entry)
+        for (fd, entry) in self.entries.iter_mut().enumerate() {
+            if entry.is_none() {
+                *entry = Some(file);
+                return fd;
+            }
+        }
+
+        // Step 2: No free slots, push new entry at end
+        let new_fd = self.entries.len();
+        self.entries.push(Some(file));
+        new_fd
     }
 
     /// Get the file object for an fd. Returns None if the fd doesn't exist or is closed.
     pub fn get(&self, fd: usize) -> Option<Arc<dyn File>> {
-        // TODO
-        todo!()
+        self.entries.get(fd)?.clone()
     }
 
     /// Close an fd. Returns true on success, false if the fd doesn't exist or is already closed.
     pub fn close(&mut self, fd: usize) -> bool {
-        // TODO
-        todo!()
+        match self.entries.get_mut(fd) {
+            Some(entry) if entry.is_some() => {
+                *entry = None;
+                true
+            }
+            // fd out of bounds OR slot already None
+            _ => false,
+        }
     }
 
     /// Return the number of currently allocated fds (excluding closed ones)
     pub fn count(&self) -> usize {
-        // TODO
-        todo!()
+        self.entries.iter().filter(|e| e.is_some()).count()
     }
 }
 

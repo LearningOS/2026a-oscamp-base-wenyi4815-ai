@@ -37,7 +37,8 @@
 #![cfg_attr(not(test), no_std)]
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::null_mut;
+use core::ptr::{null_mut, read, write};
+use core::sync::atomic::Ordering;
 
 /// Free block header, stored at the beginning of each free memory block
 struct FreeBlock {
@@ -105,33 +106,73 @@ impl FreeListAllocator {
 unsafe impl GlobalAlloc for FreeListAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // Ensure block is at least large enough to hold a FreeBlock header (for future dealloc)
-        let size = layout.size().max(core::mem::size_of::<FreeBlock>());
-        let align = layout.align().max(core::mem::align_of::<FreeBlock>());
+        let min_header_size = core::mem::size_of::<FreeBlock>();
+        let min_header_align = core::mem::align_of::<FreeBlock>();
+        let req_size = layout.size().max(min_header_size);
+        let req_align = layout.align().max(min_header_align);
 
-        // TODO: Step 1 — traverse free_list, find a suitable block (first-fit)
-        //
-        // Hints:
-        // - Use prev_ptr and curr to traverse the list
-        // - Check if curr address satisfies align, and (*curr).size >= size
-        // - If found, remove it from the list (update prev's next or the free_list head)
-        // - Return curr as *mut u8
+        // Step 1: First-fit search over free list
+        let mut prev: *mut FreeBlock = null_mut();
+        let mut curr = self.free_list_head();
 
-        // TODO: Step 2 — no suitable block in free_list, allocate from bump region
-        //
-        // Same logic as 02_bump_allocator's alloc
-        todo!()
+        while !curr.is_null() {
+            let block_addr = curr as usize;
+            let block: &FreeBlock = &*curr;
+
+            // Check alignment and sufficient size
+            if block_addr % req_align == 0 && block.size >= req_size {
+                // Remove this block from free list
+                if prev.is_null() {
+                    // Block is list head: update global head
+                    self.set_free_list_head(block.next);
+                } else {
+                    // Block is mid/list tail: update previous block's next pointer
+                    (*prev).next = block.next;
+                }
+                // Return block start as u8 pointer
+                return curr.cast::<u8>();
+            }
+
+            // Advance traversal
+            prev = curr;
+            curr = block.next;
+        }
+
+        // Step 2: No suitable free block found — allocate via bump allocator
+        let mut bump_ptr = self.bump_next.load(Ordering::Relaxed);
+        // Calculate alignment padding
+        let padding = bump_ptr.next_multiple_of(req_align) - bump_ptr;
+        let total_needed = padding + req_size;
+        let new_bump = bump_ptr + total_needed;
+
+        // Out of heap memory check
+        if new_bump > self.heap_end {
+            return null_mut();
+        }
+
+        // Atomic bump pointer advance
+        self.bump_next.store(new_bump, Ordering::Relaxed);
+        // Return aligned start address
+        (bump_ptr + padding) as *mut u8
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        let size = layout.size().max(core::mem::size_of::<FreeBlock>());
+        let min_header_size = core::mem::size_of::<FreeBlock>();
+        let block_size = layout.size().max(min_header_size);
+        let block_ptr = ptr.cast::<FreeBlock>();
 
-        // TODO: Insert the freed block at the head of free_list
-        //
-        // Steps:
-        // 1. Cast ptr to *mut FreeBlock
-        // 2. Write FreeBlock { size, next: current list head }
-        // 3. Update free_list head to ptr
-        todo!()
+        // Read current free list head to link new block
+        let old_head = self.free_list_head();
+        // Write intrusive FreeBlock header into freed memory
+        write(
+            block_ptr,
+            FreeBlock {
+                size: block_size,
+                next: old_head,
+            },
+        );
+        // Prepend freed block as new free list head
+        self.set_free_list_head(block_ptr);
     }
 }
 

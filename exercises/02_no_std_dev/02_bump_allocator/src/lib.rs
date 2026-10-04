@@ -35,6 +35,12 @@ use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
+/// Align address upward to the given alignment
+#[inline(always)]
+fn align_up(addr: usize, align: usize) -> usize {
+    (addr + align - 1) & !(align - 1)
+}
+
 pub struct BumpAllocator {
     heap_start: usize,
     heap_end: usize,
@@ -63,18 +69,38 @@ impl BumpAllocator {
 
 unsafe impl GlobalAlloc for BumpAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // TODO: Implement bump allocation
-        //
-        // Steps:
-        // 1. Load current next (use Ordering::SeqCst)
-        // 2. Align next up to layout.align()
-        //    Hint: align_up(addr, align) = (addr + align - 1) & !(align - 1)
-        // 3. Compute allocation end = aligned + layout.size()
-        // 4. If end > heap_end, return null_mut()
-        // 5. Atomically update next to end using compare_exchange
-        //    (if CAS fails, another thread raced — retry in a loop)
-        // 6. Return the aligned address as a pointer
-        todo!()
+        let size = layout.size();
+        let align = layout.align();
+
+        // CAS retry loop for concurrent allocation
+        loop {
+            // Step 1: Load current next pointer
+            let current_next = self.next.load(Ordering::SeqCst);
+
+            // Step 2: Align current_next up to required alignment
+            let aligned_addr = align_up(current_next, align);
+
+            // Step 3: Calculate end address after allocation
+            let alloc_end = aligned_addr + size;
+
+            // Step 4: Out of memory check
+            if alloc_end > self.heap_end {
+                return null_mut();
+            }
+
+            // Step 5: Atomic CAS to claim memory range
+            match self.next.compare_exchange(
+                current_next,
+                alloc_end,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                // CAS success: we reserved the memory
+                Ok(_) => return aligned_addr as *mut u8,
+                // CAS failed: another thread allocated first, retry loop
+                Err(_) => continue,
+            }
+        }
     }
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
