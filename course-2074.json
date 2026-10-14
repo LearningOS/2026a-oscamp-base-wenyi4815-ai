@@ -2,8 +2,8 @@
   "schema": 1,
   "courseId": 2074,
   "repository": "LearningOS/2026a-oscamp-base-wenyi4815-ai",
-  "commit": "a0d7e4439ff8a16d0788fac38becea64d0fa3b91",
-  "score": 83,
+  "commit": "e1863114425384294bc37679c52cedcae6d4b938",
+  "score": 84,
   "totalScore": 100,
   "exercises": [
     {
@@ -100,9 +100,9 @@
     {
       "name": "rwlock",
       "max": 5,
-      "score": 0,
-      "status": "timeout",
-      "exitCode": 124
+      "score": 5,
+      "status": "pass",
+      "exitCode": 0
     },
     {
       "name": "stack_coroutine",
@@ -142,9 +142,9 @@
     {
       "name": "select_timeout",
       "max": 4,
-      "score": 4,
-      "status": "pass",
-      "exitCode": 0
+      "score": 0,
+      "status": "fail",
+      "exitCode": 101
     },
     {
       "name": "pte_flags",
@@ -176,9 +176,9 @@
     }
   ],
   "student": "wenyi4815-ai",
-  "runId": "38584502473",
+  "runId": "38587349252",
   "runAttempt": "1",
   "upload": {
-    "status": "accepted"
+    "status": "pending"
   }
 }
