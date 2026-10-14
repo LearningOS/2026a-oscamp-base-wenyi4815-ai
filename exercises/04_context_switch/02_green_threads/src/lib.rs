@@ -4,12 +4,14 @@
 //! This crate is **riscv64 only**; run with the repo's normal flow (`./check.sh` / `oscamp`) or natively on riscv64.
 //!
 //! ## Key Concepts
+//!
 //! - Cooperative vs preemptive scheduling
 //! - Thread state: `Ready`, `Running`, `Finished`
 //! - `yield_now()`: current thread voluntarily gives up the CPU
 //! - Scheduler loop: pick next ready thread and switch to it
 //!
 //! ## Design
+//!
 //! Each green thread has its own stack and `TaskContext`. Threads call `yield_now()` to yield.
 //! The scheduler round-robins among ready threads. User entry is wrapped by `thread_wrapper`, which
 //! calls the entry then marks the thread `Finished` and switches back.
@@ -19,7 +21,7 @@
 use core::arch::naked_asm;
 
 /// Per-thread stack size. Slightly larger to avoid overflow under QEMU / test harness.
-const STACK_SIZE: usize = 1024 * 128;
+const STACK_SIZE: usize = 1024 * 128; // 128KB 栈
 
 /// Task context (riscv64); layout must match `01_stack_coroutine::TaskContext` and the asm below.
 #[repr(C)]
@@ -43,30 +45,31 @@ pub struct TaskContext {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ThreadState {
-    Ready,
-    Running,
-    Finished,
+    Ready,    // 就绪：等待被调度
+    Running,  // 运行中：正在占用CPU
+    Finished, // 已完成：执行完毕
 }
 
 struct GreenThread {
     ctx: TaskContext,
     state: ThreadState,
     _stack: Option<Vec<u8>>,
-    /// User entry; taken once when the thread is first scheduled and passed to `thread_wrapper`.
+    /// 用户入口函数，首次调度时取出交给包装函数执行
     entry: Option<extern "C" fn()>,
 }
 
-/// Set by the scheduler before switching to a new thread; `thread_wrapper` reads and calls it once.
+/// 全局变量：新线程的入口函数，调度器设置、thread_wrapper 读取
 static mut CURRENT_THREAD_ENTRY: Option<extern "C" fn()> = None;
 
-/// Wrapper run as the initial `ra` for each green thread: call the user entry (from `CURRENT_THREAD_ENTRY`), then mark Finished and switch back.
+/// 每个绿色线程的入口包装函数：调用用户入口，执行完后标记完成并切回调度器
 extern "C" fn thread_wrapper() {
+    // 读取全局变量里的用户入口
     let entry = unsafe { core::ptr::read(&raw const CURRENT_THREAD_ENTRY) };
     if let Some(f) = entry {
-        unsafe { CURRENT_THREAD_ENTRY = None };
-        f();
+        unsafe { CURRENT_THREAD_ENTRY = None }; // 取走后清空，只执行一次
+        f(); // 调用真正的用户线程函数
     }
-    thread_finished();
+    thread_finished(); // 用户函数返回后，标记线程结束
 }
 
 /// Save current callee-saved regs into `old`, load from `new`, then `ret` to `new.ra`.
@@ -111,12 +114,13 @@ unsafe extern "C" fn switch_context(_old: &mut TaskContext, _new: &TaskContext) 
 }
 
 pub struct Scheduler {
-    threads: Vec<GreenThread>,
-    current: usize,
+    threads: Vec<GreenThread>, // 所有线程列表
+    current: usize,            // 当前正在运行的线程索引
 }
 
 impl Scheduler {
     pub fn new() -> Self {
+        // 初始化主线程（索引0），不需要额外栈，用程序默认栈
         let main_thread = GreenThread {
             ctx: TaskContext::default(),
             state: ThreadState::Running,
@@ -137,7 +141,25 @@ impl Scheduler {
     ///    `sp` must be 16-byte aligned (e.g. `(stack_top - 16) & !15` to leave headroom).
     /// 3. Push a `GreenThread` with this context, state `Ready`, and `entry` stored for the wrapper to call.
     pub fn spawn(&mut self, entry: extern "C" fn()) {
-        todo!("alloc stack, init ctx with ra=thread_wrapper and aligned sp, push GreenThread(Ready, entry)")
+        // 1. 分配独立栈空间
+        let stack = vec![0u8; STACK_SIZE];
+        let stack_top = stack.as_ptr() as usize + STACK_SIZE;
+
+        // 2. 初始化任务上下文
+        let mut ctx = TaskContext::default();
+        // 首次切换先执行包装函数 thread_wrapper
+        ctx.ra = thread_wrapper as u64;
+        // 栈指针对齐，预留16字节防止栈溢出
+        ctx.sp = ((stack_top - 16) & !15) as u64;
+
+        // 3. 创建绿色线程，加入调度队列，状态为就绪
+        let thread = GreenThread {
+            ctx,
+            state: ThreadState::Ready,
+            _stack: Some(stack),
+            entry: Some(entry),
+        };
+        self.threads.push(thread);
     }
 
     /// Run the scheduler until all threads (except the main one) are `Finished`.
@@ -146,12 +168,74 @@ impl Scheduler {
     /// 2. Loop: if all threads in `threads[1..]` are `Finished`, break; otherwise call `schedule_next()` (which may switch away and later return).
     /// 3. Clear `SCHEDULER` when done.
     pub fn run(&mut self) {
-        todo!("set SCHEDULER to self, loop until threads[1..] all Finished, call schedule_next, then clear SCHEDULER")
+        // 1. 设置全局调度器指针，让 yield_now 等函数能找到调度器
+        unsafe {
+            SCHEDULER = self as *mut Scheduler;
+        }
+
+        // 2. 调度主循环：直到所有用户线程都执行完
+        loop {
+            // 检查所有非主线程是否都已结束
+            let all_finished = self.threads[1..]
+                .iter()
+                .all(|t| t.state == ThreadState::Finished);
+            if all_finished {
+                break;
+            }
+            // 调度下一个就绪线程
+            self.schedule_next();
+        }
+
+        // 3. 清空全局指针，避免悬空指针
+        unsafe {
+            SCHEDULER = std::ptr::null_mut();
+        }
     }
 
     /// Find the next ready thread (starting from `current + 1` round-robin), mark current as `Ready` (if not `Finished`), mark next as `Running`, set `CURRENT_THREAD_ENTRY` if the next thread has an entry, then switch to it.
     fn schedule_next(&mut self) {
-        todo!("round-robin find next Ready, set current Ready (if not Finished), next Running, CURRENT_THREAD_ENTRY, then switch_context")
+        let thread_count = self.threads.len();
+        let current_idx = self.current;
+
+        // 1. 轮询查找下一个就绪线程（Round-Robin 轮转调度）
+        let mut next_idx = None;
+        for offset in 1..=thread_count {
+            let idx = (current_idx + offset) % thread_count;
+            if self.threads[idx].state == ThreadState::Ready {
+                next_idx = Some(idx);
+                break;
+            }
+        }
+        // 没有就绪线程就直接返回
+        let next_idx = match next_idx {
+            Some(idx) => idx,
+            None => return,
+        };
+
+        // 2. 更新当前线程状态：没结束就放回就绪队列
+        if self.threads[current_idx].state != ThreadState::Finished {
+            self.threads[current_idx].state = ThreadState::Ready;
+        }
+
+        // 3. 下一个线程标记为运行中
+        self.threads[next_idx].state = ThreadState::Running;
+
+        // 4. 首次调度的线程，把入口放到全局变量供包装函数读取
+        if let Some(entry) = self.threads[next_idx].entry.take() {
+            unsafe {
+                CURRENT_THREAD_ENTRY = Some(entry);
+            }
+        }
+
+        // 5. 更新当前线程索引
+        self.current = next_idx;
+
+        // 6. 执行上下文切换（核心！）
+        unsafe {
+            let old_ctx = &mut self.threads[current_idx].ctx;
+            let new_ctx = &self.threads[next_idx].ctx;
+            switch_context(old_ctx, new_ctx);
+        }
     }
 }
 
@@ -166,7 +250,7 @@ impl TaskContext {
 
 static mut SCHEDULER: *mut Scheduler = std::ptr::null_mut();
 
-/// Current thread voluntarily yields; the scheduler will pick the next ready thread.
+/// 当前线程主动让出CPU，调度器切换到下一个就绪线程
 pub fn yield_now() {
     unsafe {
         if !SCHEDULER.is_null() {
@@ -175,7 +259,7 @@ pub fn yield_now() {
     }
 }
 
-/// Mark current thread as `Finished` and switch to the next (called by `thread_wrapper` after the user entry returns).
+/// 标记当前线程已结束，切换到下一个线程（由 thread_wrapper 自动调用）
 fn thread_finished() {
     unsafe {
         if !SCHEDULER.is_null() {
@@ -192,7 +276,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
 
-    /// Tests must run serially: the scheduler uses global state (SCHEDULER, CURRENT_THREAD_ENTRY).
+    /// 测试必须串行执行：调度器使用了全局状态
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     static EXEC_ORDER: AtomicU32 = AtomicU32::new(0);

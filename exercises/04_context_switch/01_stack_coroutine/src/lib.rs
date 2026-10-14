@@ -5,17 +5,21 @@
 //! run `cargo test` on riscv64 Linux, or use the repo's normal flow (`./check.sh` / `oscamp`) on x86 with QEMU.
 //!
 //! ## Key Concepts
+//!
 //! - **Callee-saved registers**: Save and restore them on switch so the switched-away task can resume correctly later.
 //! - **Stack pointer `sp`** and **return address `ra`**: Restore them in the new context; the first time we switch to a task, `ret` jumps to `ra` (the entry point).
 //! - Inline assembly: `core::arch::asm!`
 //!
 //! ## riscv64 ABI (for this exercise)
+//!
 //! - Callee-saved: `sp`, `ra`, `s0`–`s11`. The `ret` instruction is `jalr zero, 0(ra)`.
 //! - First and second arguments: `a0` (old context), `a1` (new context).
 
 #![cfg(target_arch = "riscv64")]
 
-/// Saved register state for one task (riscv64). Layout must match the offsets used in the asm below: for one task (riscv64). Layout must match the offsets used in the asm below:
+use core::arch::naked_asm;
+
+/// Saved register state for one task (riscv64). Layout must match the offsets used in the asm below:
 /// `sp` at 0, `ra` at 8, then `s0`–`s11` at 16, 24, … 104.
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
@@ -62,7 +66,10 @@ impl TaskContext {
     /// - Set `sp = stack_top` with 16-byte alignment (RISC-V ABI requires 16-byte aligned stack at function entry).
     /// - Leave `s0`–`s11` zero; they will be loaded on switch.
     pub fn init(&mut self, stack_top: usize, entry: usize) {
-        todo!("set ra = entry, sp = stack_top (16-byte aligned)")
+        // 设置返回地址为任务入口，首次切换时 ret 会跳转到这里
+        self.ra = entry as u64;
+        // 栈指针对齐到 16 字节边界（RISC-V ABI 强制要求）
+        self.sp = (stack_top as u64) & !0xF;
     }
 }
 
@@ -71,16 +78,60 @@ impl TaskContext {
 /// In asm: store `sp`, `ra`, `s0`–`s11` to `[a0]` (old), load from `[a1]` (new), zero `a0`/`a1` so we do not leak pointers into the new context, then `ret`.
 ///
 /// Must be `#[unsafe(naked)]` to prevent the compiler from generating a prologue/epilogue.
+#[unsafe(naked)]
 pub unsafe fn switch_context(old: &mut TaskContext, new: &TaskContext) {
-    todo!("save callee-saved regs to old, load from new, then ret; use #[unsafe(naked)] + naked_asm!, see module doc for riscv64 ABI and layout")
+    naked_asm!(
+        // ========== 1. 保存当前上下文到 old 结构体 ==========
+        // a0 寄存器存放第一个参数 old 的指针
+        "sd sp, 0(a0)",   // 保存栈指针 sp 到 old.sp（内存偏移 0 字节）
+        "sd ra, 8(a0)",   // 保存返回地址 ra 到 old.ra（内存偏移 8 字节）
+        "sd s0, 16(a0)",  // 依次保存被调用者保存寄存器 s0~s11
+        "sd s1, 24(a0)",
+        "sd s2, 32(a0)",
+        "sd s3, 40(a0)",
+        "sd s4, 48(a0)",
+        "sd s5, 56(a0)",
+        "sd s6, 64(a0)",
+        "sd s7, 72(a0)",
+        "sd s8, 80(a0)",
+        "sd s9, 88(a0)",
+        "sd s10, 96(a0)",
+        "sd s11, 104(a0)",
+
+        // ========== 2. 从 new 结构体加载新上下文 ==========
+        // a1 寄存器存放第二个参数 new 的指针
+        "ld sp, 0(a1)",   // 加载新栈指针 sp
+        "ld ra, 8(a1)",   // 加载新返回地址 ra
+        "ld s0, 16(a1)",  // 依次加载被调用者保存寄存器 s0~s11
+        "ld s1, 24(a1)",
+        "ld s2, 32(a1)",
+        "ld s3, 40(a1)",
+        "ld s4, 48(a1)",
+        "ld s5, 56(a1)",
+        "ld s6, 64(a1)",
+        "ld s7, 72(a1)",
+        "ld s8, 80(a1)",
+        "ld s9, 88(a1)",
+        "ld s10, 96(a1)",
+        "ld s11, 104(a1)",
+
+        // ========== 3. 安全清理与跳转 ==========
+        "li a0, 0",       // 清零参数寄存器，避免指针泄露到新上下文
+        "li a1, 0",
+        "ret",            // 返回，跳转到 ra（即新上下文的入口点）
+    );
 }
 
-const STACK_SIZE: usize = 1024 * 64;
+const STACK_SIZE: usize = 1024 * 64; // 64KB 栈大小
 
 /// Allocate a stack for a coroutine. Returns `(buffer, stack_top)` where `stack_top` is the high address
 /// (stack grows down). The buffer must be kept alive for the lifetime of the context using this stack.
 pub fn alloc_stack() -> (Vec<u8>, usize) {
-    todo!("allocate stack buffer, return (buffer, stack_top) with stack_top 16-byte aligned")
+    // 分配连续字节内存作为栈
+    let buffer = vec![0u8; STACK_SIZE];
+    // 栈向下增长，栈顶是缓冲区的最高地址
+    let stack_top = buffer.as_ptr() as usize + STACK_SIZE;
+    (buffer, stack_top)
 }
 
 #[cfg(test)]

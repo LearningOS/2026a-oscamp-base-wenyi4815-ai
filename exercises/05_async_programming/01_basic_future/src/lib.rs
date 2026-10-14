@@ -3,8 +3,11 @@
 //! In this exercise, you will manually implement the `Future` trait for custom types to understand the core mechanism of asynchronous runtime.
 //!
 //! ## Concepts
+//!
 //! - `std::future::Future` trait
+//!
 //! - `Poll::Ready` and `Poll::Pending`
+//!
 //! - The role of `Waker`: notifying the runtime to poll again
 
 use std::future::Future;
@@ -33,7 +36,14 @@ impl Future for CountDown {
     type Output = &'static str;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
+        let this = self.get_mut();
+        if this.count == 0 {
+            Poll::Ready("liftoff!")
+        } else {
+            this.count -= 1;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
     }
 }
 
@@ -57,7 +67,14 @@ impl Future for YieldOnce {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
+        let this = self.get_mut();
+        if !this.yielded {
+            this.yielded = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
     }
 }
 

@@ -4,12 +4,13 @@
 //! Spin locks are one of the most fundamental synchronization primitives in OS kernels.
 //!
 //! ## Key Concepts
-//! - Spin locks use busy-waiting to acquire the lock
+//! - Spin locks use busy‑waiting to acquire the lock
 //! - `AtomicBool`'s `compare_exchange` to implement lock acquisition
 //! - `core::hint::spin_loop` to reduce CPU power consumption
 //! - `UnsafeCell` provides interior mutability
 
 use std::cell::UnsafeCell;
+use std::hint::spin_loop;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Basic spin lock
@@ -40,23 +41,35 @@ impl<T> SpinLock<T> {
     /// # Safety
     /// Caller must ensure `unlock` is called after using the data.
     pub fn lock(&self) -> &mut T {
-        // TODO
-        todo!()
+        loop {
+            match self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
+                Ok(_) => {
+                    // 获取锁成功，返回内部可变引用
+                    return unsafe { &mut *self.data.get() };
+                }
+                Err(_) => {
+                    // 获取锁失败，自旋等待，给CPU提示可以降功耗
+                    spin_loop();
+                }
+            }
+        }
     }
 
     /// Release lock.
     ///
     /// TODO: Set locked to false (using Release ordering)
     pub fn unlock(&self) {
-        // TODO
-        todo!()
+        // Release：保证锁保护的数据修改全部完成，再释放锁
+        self.locked.store(false, Ordering::Release);
     }
 
     /// Try to acquire lock without spinning.
     /// Returns Some(&mut T) on success, None if lock is busy.
     pub fn try_lock(&self) -> Option<&mut T> {
-        // TODO: Single compare_exchange attempt
-        todo!()
+        self.locked
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| unsafe { &mut *self.data.get() })
     }
 }
 
