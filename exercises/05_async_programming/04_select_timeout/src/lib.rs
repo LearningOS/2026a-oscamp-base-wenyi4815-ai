@@ -11,7 +11,7 @@
 //! - The first completed branch is executed, others are cancelled
 
 use std::future::Future;
-use tokio::time::Duration;
+use tokio::time::{sleep, Duration};
 
 /// Async operation with timeout.
 /// If `future` completes within `timeout_ms` milliseconds, returns Some(result).

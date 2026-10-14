@@ -111,17 +111,17 @@ unsafe impl GlobalAlloc for FreeListAllocator {
         let req_size = layout.size().max(min_header_size);
         let req_align = layout.align().max(min_header_align);
 
-        // Step 1: First-fit search over free list
+        // Step 1 — traverse free_list, find a suitable block (first-fit)
         let mut prev: *mut FreeBlock = null_mut();
         let mut curr = self.free_list_head();
 
         while !curr.is_null() {
             let block_addr = curr as usize;
-            let block: &FreeBlock = &*curr;
+            let block = &*curr;
 
             // Check alignment and sufficient size
             if block_addr % req_align == 0 && block.size >= req_size {
-                // Remove this block from free list
+                // Remove from free list
                 if prev.is_null() {
                     // Block is list head: update global head
                     self.set_free_list_head(block.next);
@@ -129,7 +129,7 @@ unsafe impl GlobalAlloc for FreeListAllocator {
                     // Block is mid/list tail: update previous block's next pointer
                     (*prev).next = block.next;
                 }
-                // Return block start as u8 pointer
+                // Return block as user pointer
                 return curr.cast::<u8>();
             }
 
@@ -138,22 +138,23 @@ unsafe impl GlobalAlloc for FreeListAllocator {
             curr = block.next;
         }
 
-        // Step 2: No suitable free block found — allocate via bump allocator
+        // Step 2 — no suitable block in free_list, allocate from bump region
         let bump_ptr = self.bump_next.load(Ordering::Relaxed);
-        // Calculate alignment padding
-        let padding = bump_ptr.next_multiple_of(req_align) - bump_ptr;
-        let total_needed = padding + req_size;
-        let new_bump = bump_ptr + total_needed;
 
-        // Out of heap memory check
+        // Calculate aligned start address and padding
+        let aligned_start = bump_ptr.next_multiple_of(req_align);
+        let padding = aligned_start - bump_ptr;
+        let total_needed = padding + req_size;
+        let new_bump = aligned_start + req_size;
+
+        // Out of heap memory
         if new_bump > self.heap_end {
             return null_mut();
         }
 
-        // Atomic bump pointer advance
+        // Advance bump pointer and return aligned address
         self.bump_next.store(new_bump, Ordering::Relaxed);
-        // Return aligned start address
-        (bump_ptr + padding) as *mut u8
+        aligned_start as *mut u8
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
@@ -161,9 +162,8 @@ unsafe impl GlobalAlloc for FreeListAllocator {
         let block_size = layout.size().max(min_header_size);
         let block_ptr = ptr.cast::<FreeBlock>();
 
-        // Read current free list head to link new block
+        // Insert freed block at the head of free_list
         let old_head = self.free_list_head();
-        // Write intrusive FreeBlock header into freed memory
         write(
             block_ptr,
             FreeBlock {
@@ -171,7 +171,6 @@ unsafe impl GlobalAlloc for FreeListAllocator {
                 next: old_head,
             },
         );
-        // Prepend freed block as new free list head
         self.set_free_list_head(block_ptr);
     }
 }
