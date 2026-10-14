@@ -37,7 +37,7 @@
 #![cfg_attr(not(test), no_std)]
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::{null_mut, read, write};
+use core::ptr::{null_mut, write};
 use core::sync::atomic::Ordering;
 
 /// Free block header, stored at the beginning of each free memory block
@@ -139,7 +139,7 @@ unsafe impl GlobalAlloc for FreeListAllocator {
         }
 
         // Step 2: No suitable free block found — allocate via bump allocator
-        let mut bump_ptr = self.bump_next.load(Ordering::Relaxed);
+        let bump_ptr = self.bump_next.load(Ordering::Relaxed);
         // Calculate alignment padding
         let padding = bump_ptr.next_multiple_of(req_align) - bump_ptr;
         let total_needed = padding + req_size;
