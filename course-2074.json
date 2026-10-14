@@ -2,8 +2,8 @@
   "schema": 1,
   "courseId": 2074,
   "repository": "LearningOS/2026a-oscamp-base-wenyi4815-ai",
-  "commit": "488deb12e0a61fc63f7b45ec5d97c711f8ae14cf",
-  "score": 77,
+  "commit": "a0d7e4439ff8a16d0788fac38becea64d0fa3b91",
+  "score": 83,
   "totalScore": 100,
   "exercises": [
     {
@@ -100,9 +100,9 @@
     {
       "name": "rwlock",
       "max": 5,
-      "score": 5,
-      "status": "pass",
-      "exitCode": 0
+      "score": 0,
+      "status": "timeout",
+      "exitCode": 124
     },
     {
       "name": "stack_coroutine",
@@ -156,29 +156,29 @@
     {
       "name": "page_table_walk",
       "max": 4,
-      "score": 0,
-      "status": "fail",
-      "exitCode": 101
+      "score": 4,
+      "status": "pass",
+      "exitCode": 0
     },
     {
       "name": "multi_level_pt",
       "max": 4,
-      "score": 0,
-      "status": "fail",
-      "exitCode": 101
+      "score": 4,
+      "status": "pass",
+      "exitCode": 0
     },
     {
       "name": "tlb_sim",
       "max": 3,
-      "score": 0,
-      "status": "fail",
-      "exitCode": 101
+      "score": 3,
+      "status": "pass",
+      "exitCode": 0
     }
   ],
   "student": "wenyi4815-ai",
-  "runId": "38582257561",
+  "runId": "38584502473",
   "runAttempt": "1",
   "upload": {
-    "status": "accepted"
+    "status": "pending"
   }
 }
