@@ -230,11 +230,19 @@ impl Scheduler {
         // 5. 更新当前线程索引
         self.current = next_idx;
 
-        // 6. 执行上下文切换（核心！）
+        // 6. 执行上下文切换，使用split_at_mut解决借用冲突
         unsafe {
-            let old_ctx = &mut self.threads[current_idx].ctx;
-            let new_ctx = &self.threads[next_idx].ctx;
-            switch_context(old_ctx, new_ctx);
+            if current_idx < next_idx {
+                let (left, right) = self.threads.split_at_mut(next_idx);
+                let old_ctx = &mut left[current_idx].ctx;
+                let new_ctx = &right[0].ctx;
+                switch_context(old_ctx, new_ctx);
+            } else {
+                let (left, right) = self.threads.split_at_mut(current_idx);
+                let old_ctx = &mut right[0].ctx;
+                let new_ctx = &left[next_idx].ctx;
+                switch_context(old_ctx, new_ctx);
+            }
         }
     }
 }

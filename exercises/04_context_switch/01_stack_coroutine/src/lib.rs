@@ -79,7 +79,7 @@ impl TaskContext {
 ///
 /// Must be `#[unsafe(naked)]` to prevent the compiler from generating a prologue/epilogue.
 #[unsafe(naked)]
-pub unsafe fn switch_context(old: &mut TaskContext, new: &TaskContext) {
+pub unsafe extern "C" fn switch_context(old: &mut TaskContext, new: &TaskContext) {
     naked_asm!(
         // ========== 1. 保存当前上下文到 old 结构体 ==========
         // a0 寄存器存放第一个参数 old 的指针
